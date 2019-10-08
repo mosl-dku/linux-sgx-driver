@@ -255,6 +255,12 @@ static int sgx_dev_init(struct device *parent)
 	if (ret)
 		goto out_iounmap;
 
+	//mig_triggering thread
+	ret = sgx_mig_init();
+	if (ret) {
+		pr_err("intel_sgx: mig_disabled");
+	}
+
 	sgx_add_page_wq = alloc_workqueue("intel_sgx-add-page-wq",
 					  WQ_UNBOUND | WQ_FREEZABLE, 1);
 	if (!sgx_add_page_wq) {
@@ -349,6 +355,7 @@ static int sgx_drv_remove(struct platform_device *pdev)
 		iounmap((void *)sgx_epc_banks[i].va);
 #endif
 	sgx_page_cache_teardown();
+	sgx_mig_cleanup();
 
 	return 0;
 }

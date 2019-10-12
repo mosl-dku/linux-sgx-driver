@@ -74,14 +74,10 @@
 #include <linux/hashtable.h>
 #include <linux/shmem_fs.h>
 
-#include <linux/kernel.h>
-#include <linux/socket.h>
-#include <linux/net.h>
-#include <linux/un.h>
-#include <net/sock.h>
 #include <linux/fs.h>
-#include <asm/segment.h>
-#include <linux/uaccess.h>
+#include <linux/syscalls.h>
+#include <linux/poll.h>
+#include <linux/wait.h>
 
 static struct task_struct *ksgxmigd_task;
 
@@ -1035,102 +1031,61 @@ static void on_migration(void)
 	// kill_pid(pid, SIGUSR2, SEND_SIG_PRIV)
 			p =  get_task_pid(encl->task, PIDTYPE_PID);
 			kill_pid(p, SIGMIGRATION, 1);
+			printk("intel_sgx: mig Sending SIGMIGRATION to %d\n", encl->task->pid);
 		}
 	}
 	return;
 
 }
 
+static DECLARE_WAIT_QUEUE_HEAD(mig_poll_wait);
 #define SOCKET_NAME "/dev/virtio-ports/vsgxer.migration.0"
+static char MIGRATION_STRING[11];
+#define MIGRATION_STRING_LENGTH 10
 int sgx_mig_thread(void *p)
 {
-/*
+
 	int flag;
 	int mode;
 	struct file *filp;
-*/
+	int ret = 0;
+	struct poll_table_struct pt = { ._key = POLLIN };
+	char buff[256];
 
-/* works for opened connection, however, it does not work as server side
 	flag = O_RDWR; //open for RD,WR - no other can open with write mode
 	mode = S_IRUSR;
 	filp = filp_open("/dev/virtio-ports/vsgxer.migration.0", flag, mode);
-
 	if (IS_ERR(filp)) {
 		pr_err("intel_sgx: filp_open error");
 		ksgxmigd_task = NULL;
 		return -1;
 	}
+	memset(MIGRATION_STRING, 0, sizeof(MIGRATION_STRING));
+	memcpy(MIGRATION_STRING, "MIGRATION\n", 10);
+
 	while (1) {
 		memset(buff, 0, sizeof(buff));
-		int ret = kernel_read(filp, buff, sizeof(buff), &filp->f_pos);
-		if (ret == 0) {
-			printk("mig_thr: %s (%d off: %x) filp: %p\n",
-				buff, ret, filp->f_pos, filp);
-			break;
-		}
-		printk("mig_thr: %s (%d off: %x)\n", buff, ret, filp->f_pos);
-		if (strncmp("MIGRATION", buff, sizeof(buff)) == 0) {
-			on_migration();
+		ret = vfs_poll(filp, &pt);
+
+		if (ret & POLLIN) {
+			ret = kernel_read(filp, buff, sizeof(buff), &filp->f_pos);
+			if (ret < 0) {
+				goto wait;
+			}
+			printk("mig_thr: %s \n", buff);
+			if (strncmp(MIGRATION_STRING, buff, MIGRATION_STRING_LENGTH) == 0) {
+				on_migration();
+			}
+		} else {
+wait:
+			usleep_range(10000, 200000);
+			if (kthread_should_stop()) break;
 		}
 	}
 
 	filp_close(filp, NULL);
 	ksgxmigd_task = NULL;
 
-*/
-	struct socket *sock = NULL;
-	struct socket *newsock = NULL;
-	struct sockaddr_un name;
-	char opt = 1;
-
-	// open socket
-	int err = sock_create(AF_UNIX, SOCK_STREAM, 0, &sock);
-	if (err < 0) {
-		pr_err("intel_sgx: sock creation failed\n");
-		ksgxmigd_task = NULL;
-		return -1;
-	}
-	memset(&name, 0, sizeof(struct sockaddr_un));
-	name.sun_family = AF_UNIX;
-	strncpy(name.sun_path, SOCKET_NAME, sizeof(name.sun_path)-1);
-
-	sock->ops->setsockopt(sock, SOL_SOCKET, SO_REUSEADDR, &opt, sizeof(opt));
-	err = sock->ops->bind(sock, (struct sockaddr *)&name, sizeof(struct sockaddr_un));
-	if (err < 0) {
-		pr_err("intel_sgx: sock bind failed %d\n", err);
-		ksgxmigd_task = NULL;
-		return -1;
-	}
-	err = sock->ops->listen(sock, 10); // LISTEN 10
-
-	while (1) {
-	size_t length = 256;
-	char buff[256] = {0,};
-	struct kvec iov = {buff, length};
-	struct msghdr msg = {.msg_flags = MSG_DONTWAIT | MSG_NOSIGNAL };
-	iov_iter_kvec(&msg.msg_iter, READ, &iov, 1, length);
-
-		err = sock->ops->accept(sock, newsock, 0, true);
-		if (err < 0) {
-			pr_err("intel_sgx: sock accept failed\n");
-			ksgxmigd_task = NULL;
-			return -1;
-		}
-		err = sock_recvmsg(newsock, &msg, msg.msg_flags);
-		sock_release(sock);
-
-		if (err <= 0) {
-			printk("mig_thr:%s err:%d\n", buff, err);
-			ksgxmigd_task = NULL;
-			break;
-		}
-		printk("mig_thr:%s err:%d\n", buff, err);
-
-		if (strncmp("MIGRATION", buff, sizeof(buff)) == 0) {
-			on_migration();
-		}
-	}
-	ksgxmigd_task = NULL;
 	return 0;
 }
 
@@ -1150,4 +1105,5 @@ int sgx_mig_cleanup()
 		kthread_stop(ksgxmigd_task);
 		ksgxmigd_task = NULL;
 	}
+	return 0;
 }

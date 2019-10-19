@@ -80,6 +80,7 @@
 #include <linux/wait.h>
 
 static struct task_struct *ksgxmigd_task;
+static struct task_struct *aesmd_task = NULL;
 
 struct sgx_add_page_req {
 	struct sgx_encl *encl;
@@ -676,7 +677,7 @@ int sgx_encl_create(struct sgx_secs *secs)
 	encl->task = current;
 	mutex_unlock(&sgx_tgid_ctx_mutex);
 	// check proc_id
-	printk("sgx_create: current->pid (%d)\n", current->pid);
+	if (aesmd_task == NULL) aesmd_task = current;
 
 	return 0;
 out:
@@ -1016,6 +1017,21 @@ void sgx_encl_release(struct kref *ref)
 	kfree(encl);
 }
 
+static void off_migration(void)
+{
+
+	struct pid *p;
+
+	// send signal to aesmd service to restart
+	// kill_pid(pid, SIGKILL, SEND_SIG_PRIV)
+	p =  get_task_pid(aesmd_task, PIDTYPE_PID);
+	kill_pid(p, SIGKILL, 1);
+	printk("intel_sgx: mig Sending SIGMIGRATED to %d\n", aesmd_task->pid);
+	return;
+
+}
+
+
 #define SIGMIGRATION SIGUSR2
 static void on_migration(void)
 {
@@ -1040,8 +1056,10 @@ static void on_migration(void)
 
 static DECLARE_WAIT_QUEUE_HEAD(mig_poll_wait);
 #define SOCKET_NAME "/dev/virtio-ports/vsgxer.migration.0"
+static char MIGRATED_STRING[10];
 static char MIGRATION_STRING[11];
 #define MIGRATION_STRING_LENGTH 10
+#define MIGRATED_STRING_LENGTH 9
 int sgx_mig_thread(void *p)
 {
 
@@ -1062,6 +1080,9 @@ int sgx_mig_thread(void *p)
 	}
 	memset(MIGRATION_STRING, 0, sizeof(MIGRATION_STRING));
 	memcpy(MIGRATION_STRING, "MIGRATION\n", 10);
+	memset(MIGRATED_STRING, 0, sizeof(MIGRATED_STRING));
+	memcpy(MIGRATED_STRING, "MIGRATED\n", 10);
+
 
 	while (1) {
 		memset(buff, 0, sizeof(buff));
@@ -1075,6 +1096,8 @@ int sgx_mig_thread(void *p)
 			printk("mig_thr: %s \n", buff);
 			if (strncmp(MIGRATION_STRING, buff, MIGRATION_STRING_LENGTH) == 0) {
 				on_migration();
+			} else if (strncmp(MIGRATED_STRING, buff, MIGRATED_STRING_LENGTH) == 0) {
+				off_migration();
 			}
 		} else {
 wait:

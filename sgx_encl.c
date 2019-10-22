@@ -676,8 +676,6 @@ int sgx_encl_create(struct sgx_secs *secs)
 	list_add_tail(&encl->encl_list, &encl->tgid_ctx->encl_list);
 	encl->task = current;
 	mutex_unlock(&sgx_tgid_ctx_mutex);
-	// check proc_id
-	if (aesmd_task == NULL) aesmd_task = current;
 
 	return 0;
 out:
@@ -1017,18 +1015,10 @@ void sgx_encl_release(struct kref *ref)
 	kfree(encl);
 }
 
+struct task_struct *waiting_child_task = NULL;
 static void off_migration(void)
 {
-
-	struct pid *p;
-
-	// send signal to aesmd service to restart
-	// kill_pid(pid, SIGKILL, SEND_SIG_PRIV)
-	p =  get_task_pid(aesmd_task, PIDTYPE_PID);
-	kill_pid(p, SIGKILL, 1);
-	printk("intel_sgx: mig Sending SIGMIGRATED to %d\n", aesmd_task->pid);
-	return;
-
+	//called when migration is completed
 }
 
 
@@ -1047,9 +1037,14 @@ static void on_migration(void)
 	// kill_pid(pid, SIGUSR2, SEND_SIG_PRIV)
 			p =  get_task_pid(encl->task, PIDTYPE_PID);
 			kill_pid(p, SIGMIGRATION, 1);
+			if (waiting_child_task == NULL) {
+				waiting_child_task = encl->task;
+			};
 			printk("intel_sgx: mig Sending SIGMIGRATION to %d\n", encl->task->pid);
+			goto out;
 		}
 	}
+out:
 	return;
 
 }

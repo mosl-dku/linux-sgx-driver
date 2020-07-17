@@ -79,8 +79,8 @@ static DEFINE_SPINLOCK(sgx_free_list_lock);
 LIST_HEAD(sgx_tgid_ctx_list);
 DEFINE_MUTEX(sgx_tgid_ctx_mutex);
 atomic_t sgx_va_pages_cnt = ATOMIC_INIT(0);
-static unsigned int sgx_nr_total_epc_pages;
-static unsigned int sgx_nr_free_pages;
+unsigned int sgx_nr_total_epc_pages;
+unsigned int sgx_nr_free_pages;
 static unsigned int sgx_nr_low_pages = SGX_NR_LOW_EPC_PAGES_DEFAULT;
 static unsigned int sgx_nr_high_pages;
 static struct task_struct *ksgxswapd_tsk;
@@ -389,8 +389,10 @@ static int ksgxswapd(void *p)
 				     kthread_should_stop() ||
 				     sgx_nr_free_pages < sgx_nr_high_pages);
 
-		if (sgx_nr_free_pages < sgx_nr_high_pages)
+		if (sgx_nr_free_pages < sgx_nr_high_pages) {
 			sgx_swap_pages(SGX_NR_SWAP_CLUSTER_MAX);
+			pr_info( "sgx_swap_pages: nr_free_pages: 0x%x high_pages: 0x%x\n", sgx_nr_free_pages, sgx_nr_high_pages);
+		}
 	}
 
 	pr_info("%s: done\n", __func__);

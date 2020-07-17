@@ -1022,6 +1022,8 @@ static void off_migration(void)
 }
 
 
+extern unsigned int sgx_nr_total_epc_pages;
+extern unsigned int sgx_nr_free_pages;
 #define SIGMIGRATION SIGUSR2
 static void on_migration(void)
 {
@@ -1030,17 +1032,22 @@ static void on_migration(void)
 	struct sgx_encl *encl;
 	struct pid *p;
 
+	pr_info( "B4 on_migration: nr_total_pages: 0x%x nr_free_pages: 0x%x\n", sgx_nr_total_epc_pages, sgx_nr_free_pages);
 	list_for_each_entry(ctx, &sgx_tgid_ctx_list, list) {
 		list_for_each_entry(encl, &ctx->encl_list, encl_list) {
 
 	// send signal on migration
 	// kill_pid(pid, SIGUSR2, SEND_SIG_PRIV)
 			p =  get_task_pid(encl->task, PIDTYPE_PID);
+			kill_pid(p, SIGSTOP, 1);
 			kill_pid(p, SIGMIGRATION, 1);
+			if (encl) kref_put(&encl->refcount, sgx_encl_release);
+
 			if (waiting_child_task == NULL) {
 				waiting_child_task = encl->task;
 			};
 			printk("intel_sgx: mig Sending SIGMIGRATION to %d\n", encl->task->pid);
+			pr_info( "on_migration: nr_total_pages: 0x%x nr_free_pages: 0x%x\n", sgx_nr_total_epc_pages, sgx_nr_free_pages);
 			goto out;
 		}
 	}

@@ -70,7 +70,13 @@
 #include <linux/hashtable.h>
 #include <linux/kthread.h>
 #include <linux/platform_device.h>
-
+#include <linux/kernel.h>
+#include <linux/init.h>
+#include <linux/kobject.h>
+#include <linux/fs.h>
+#include <linux/sysfs.h>
+#include <linux/string.h>
+#include <linux/slab.h>
 #define DRV_DESCRIPTION "Intel SGX Driver"
 #define DRV_VERSION "2.5.0"
 
@@ -97,6 +103,9 @@ u64 sgx_xfrm_mask = 0x3;
 u32 sgx_misc_reserved;
 u32 sgx_xsave_size_tbl[64];
 bool sgx_has_sgx2;
+extern unsigned int sgx_nr_total_epc_pages;
+extern unsigned int sgx_nr_free_pages;
+
 
 #ifdef CONFIG_COMPAT
 long sgx_compat_ioctl(struct file *filep, unsigned int cmd, unsigned long arg)
@@ -378,24 +387,110 @@ static struct platform_driver sgx_drv = {
 	},
 };
 
-static struct platform_device *pdev;
-int init_sgx_module(void)
-{
-	platform_driver_register(&sgx_drv);
-	pdev = platform_device_register_simple("intel_sgx", 0, NULL, 0);
-	if (IS_ERR(pdev))
-		pr_err("platform_device_register_simple failed\n");
-	return 0;
+static struct kobject *sgxPages_kobj;
+
+struct sgxPages_attr{
+    struct attribute attr;
+    unsigned int total_epc_pages;
+    unsigned int free_pages;
+};
+
+static struct sgxPages_attr sgxPages_value = {
+    .attr.name = "sgxPages_value",
+    .attr.mode = 0644,
+    .total_epc_pages = UINT_MAX,
+    .free_pages = UINT_MAX,
+};
+
+static struct sgxPages_attr sgxPages_notify = {
+    .attr.name = "sgxPages_notify",
+    .attr.mode = 0644,
+    .total_epc_pages = UINT_MAX,
+    .free_pages = UINT_MAX,
+};
+
+static struct attribute * sgxPages_attrs[] = {
+    &sgxPages_value.attr,
+    &sgxPages_notify.attr,
+    NULL
+};
+
+static ssize_t sgxPages_show
+    (struct kobject *kobj, struct attribute *attr, char *buf){
+        struct sgxPages_attr *sgxPages = 
+            container_of(attr, struct sgxPages_attr, attr);
+        return scnprintf(buf, PAGE_SIZE, 
+	    "total_epc_pages : 0x%x\nfree_pages : 0x%x\n", 
+                sgx_nr_total_epc_pages, sgx_nr_free_pages);        
 }
 
-void cleanup_sgx_module(void)
-{
-	dev_set_uevent_suppress(&pdev->dev, true);
-	platform_device_unregister(pdev);
-	platform_driver_unregister(&sgx_drv);
+static ssize_t sgxPages_store
+    (struct kobject *kobj, struct attribute *attr, const char *buf, size_t len){
+        struct sgxPages_attr *sgxPages = 
+            container_of(attr, struct sgxPages_attr, attr);
+        sgxPages->total_epc_pages=sgx_nr_total_epc_pages;
+        sgxPages->free_pages=sgx_nr_free_pages;
+        sysfs_notify(sgxPages_kobj, NULL, "sgxPages_notify");
+        return len;
+}
+
+static struct sysfs_ops sgxPages_ops = {
+    .show = sgxPages_show,
+    .store = sgxPages_store,
+};
+
+static struct kobj_type sgxPages_type = {
+    .sysfs_ops = &sgxPages_ops,
+    .default_attrs = sgxPages_attrs,
+};
+
+static int __init sgxPages_init(void){
+    int ret = 0;
+    printk("%s\n", __func__);
+    sgxPages_kobj = kzalloc(sizeof(*sgxPages_kobj), GFP_KERNEL);
+    
+    if (!sgxPages_kobj){
+        printk("%s: kzalloc() failed\n", __func__);
+        return -1;
+    }
+
+    kobject_init(sgxPages_kobj, &sgxPages_type);
+    ret = kobject_add(sgxPages_kobj, NULL, "%s", "sgxPages");
+
+    if (ret) {
+        printk("kobject_add() failed. ret=%d\n", ret);
+        kobject_put(sgxPages_kobj);
+        sgxPages_kobj = NULL;
+    }
+
+    return ret; /* 0=success */
+}
+
+static void __exit sgxPages_exit(void){
+    if (sgxPages_kobj) {
+        kobject_put(sgxPages_kobj);
+    }    
+    printk("%s\n", __func__);
+}
+
+static struct platform_device *pdev;
+
+int init_sgx_module(void){
+    platform_driver_register(&sgx_drv);
+    pdev = platform_device_register_simple("intel_sgx", 0, NULL, 0);
+    sgxPages_init();
+    if (IS_ERR(pdev))
+        pr_err("platform_device_register_simple failed\n");
+    return 0;
+}
+
+void cleanup_sgx_module(void){
+    dev_set_uevent_suppress(&pdev->dev, true);
+    platform_device_unregister(pdev);
+    platform_driver_unregister(&sgx_drv);
+    sgxPages_exit();
 }
 
 module_init(init_sgx_module);
 module_exit(cleanup_sgx_module);
-
-MODULE_LICENSE("Dual BSD/GPL");
+MODULE_LICENSE("GPL");

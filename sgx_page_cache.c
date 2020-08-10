@@ -83,6 +83,8 @@ unsigned int sgx_nr_total_epc_pages;
 unsigned int sgx_nr_free_pages;
 static unsigned int sgx_nr_low_pages = SGX_NR_LOW_EPC_PAGES_DEFAULT;
 static unsigned int sgx_nr_high_pages;
+unsigned int sgx_page_swap_count=0;
+unsigned int sgx_evict_count=0;
 static struct task_struct *ksgxswapd_tsk;
 static DECLARE_WAIT_QUEUE_HEAD(ksgxswapd_waitq);
 
@@ -341,6 +343,7 @@ static void sgx_write_pages(struct sgx_encl *encl, struct list_head *src)
 	while (!list_empty(src)) {
 		entry = list_first_entry(src, struct sgx_epc_page, list);
 		list_del(&entry->list);
+		sgx_evict_count++;
 		sgx_evict_page(entry->encl_page, encl);
 		encl->secs_child_cnt--;
 	}
@@ -370,6 +373,7 @@ static void sgx_swap_pages(unsigned long nr_to_scan)
 	down_read(&encl->mm->mmap_sem);
 	sgx_isolate_pages(encl, &cluster, nr_to_scan);
 	sgx_write_pages(encl, &cluster);
+	
 	up_read(&encl->mm->mmap_sem);
 
 	kref_put(&encl->refcount, sgx_encl_release);
@@ -391,7 +395,7 @@ static int ksgxswapd(void *p)
 
 		if (sgx_nr_free_pages < sgx_nr_high_pages) {
 			sgx_swap_pages(SGX_NR_SWAP_CLUSTER_MAX);
-			pr_info( "sgx_swap_pages: nr_free_pages: 0x%x high_pages: 0x%x\n", sgx_nr_free_pages, sgx_nr_high_pages);
+			sgx_page_swap_count++;
 		}
 	}
 

@@ -82,6 +82,8 @@
 static struct task_struct *ksgxmigd_task;
 static struct task_struct *aesmd_task = NULL;
 
+extern unsigned int sgx_nr_total_epc_pages;
+extern unsigned int sgx_nr_free_pages;
 struct sgx_add_page_req {
 	struct sgx_encl *encl;
 	struct sgx_encl_page *encl_page;
@@ -677,6 +679,7 @@ int sgx_encl_create(struct sgx_secs *secs)
 	encl->task = current;
 	mutex_unlock(&sgx_tgid_ctx_mutex);
 
+	pr_info( "ecreate: nr_total_pages: 0x%x nr_free_pages: 0x%x\n", sgx_nr_total_epc_pages, sgx_nr_free_pages);
 	return 0;
 out:
 	if (encl)
@@ -1022,8 +1025,6 @@ static void off_migration(void)
 }
 
 
-extern unsigned int sgx_nr_total_epc_pages;
-extern unsigned int sgx_nr_free_pages;
 #define SIGMIGRATION SIGUSR2
 static void on_migration(void)
 {
@@ -1039,9 +1040,8 @@ static void on_migration(void)
 	// send signal on migration
 	// kill_pid(pid, SIGUSR2, SEND_SIG_PRIV)
 			p =  get_task_pid(encl->task, PIDTYPE_PID);
-			kill_pid(p, SIGSTOP, 1);
+			//kill_pid(p, SIGSTOP, 1);
 			kill_pid(p, SIGMIGRATION, 1);
-			if (encl) kref_put(&encl->refcount, sgx_encl_release);
 
 			if (waiting_child_task == NULL) {
 				waiting_child_task = encl->task;

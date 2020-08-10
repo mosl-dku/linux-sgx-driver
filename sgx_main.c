@@ -105,7 +105,8 @@ u32 sgx_xsave_size_tbl[64];
 bool sgx_has_sgx2;
 extern unsigned int sgx_nr_total_epc_pages;
 extern unsigned int sgx_nr_free_pages;
-
+extern unsigned int sgx_page_swap_count;
+extern unsigned int sgx_evict_count;
 
 #ifdef CONFIG_COMPAT
 long sgx_compat_ioctl(struct file *filep, unsigned int cmd, unsigned long arg)
@@ -420,16 +421,16 @@ static ssize_t sgxPages_show
         struct sgxPages_attr *sgxPages = 
             container_of(attr, struct sgxPages_attr, attr);
         return scnprintf(buf, PAGE_SIZE, 
-	    "total_epc_pages : 0x%x\nfree_pages : 0x%x\n", 
-                sgx_nr_total_epc_pages, sgx_nr_free_pages);        
+	    "total_epc_pages : 0x%x\nfree_pages : 0x%x\npage_swap_count : %u\nevict_page_count : %u\n", 
+                sgx_nr_total_epc_pages, sgx_nr_free_pages, 
+			sgx_page_swap_count, sgx_evict_count);        
 }
 
 static ssize_t sgxPages_store
     (struct kobject *kobj, struct attribute *attr, const char *buf, size_t len){
         struct sgxPages_attr *sgxPages = 
             container_of(attr, struct sgxPages_attr, attr);
-        sgxPages->total_epc_pages=sgx_nr_total_epc_pages;
-        sgxPages->free_pages=sgx_nr_free_pages;
+        sgx_page_swap_count=0;
         sysfs_notify(sgxPages_kobj, NULL, "sgxPages_notify");
         return len;
 }

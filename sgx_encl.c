@@ -80,7 +80,7 @@
 #include <linux/wait.h>
 
 static struct task_struct *ksgxmigd_task;
-static struct task_struct *aesmd_task = NULL;
+extern struct task_struct *aesm_svc_task;
 
 struct sgx_add_page_req {
 	struct sgx_encl *encl;
@@ -1036,12 +1036,17 @@ static void on_migration(void)
 	// send signal on migration
 	// kill_pid(pid, SIGUSR2, SEND_SIG_PRIV)
 			p =  get_task_pid(encl->task, PIDTYPE_PID);
+			if (strncmp(encl->task->comm, "aesm_service", 12) == 0) {
+				printk("intel_sgx: %s (%d)\n", encl->task->comm, encl->task->pid);
+				aesm_svc_task = encl->task;
+				continue;
+			}
 			kill_pid(p, SIGMIGRATION, 1);
 			if (waiting_child_task == NULL) {
 				waiting_child_task = encl->task;
 			};
-			printk("intel_sgx: mig Sending SIGMIGRATION to %d\n", encl->task->pid);
-			goto out;
+			printk("intel_sgx: mig Sending SIGMIGRATION to %s (%d)\n", encl->task->comm, encl->task->pid);
+			//goto out;
 		}
 	}
 out:
@@ -1065,7 +1070,7 @@ int sgx_mig_thread(void *p)
 	struct poll_table_struct pt = { ._key = POLLIN };
 	char buff[256];
 
-	flag = O_RDWR; //open for RD,WR - no other can open with write mode
+	flag = O_RDWR | O_NONBLOCK; //open for RD,WR - no other can open with write mode
 	mode = S_IRUSR;
 	filp = filp_open("/dev/virtio-ports/vsgxer.migration.0", flag, mode);
 	if (IS_ERR(filp)) {
@@ -1112,6 +1117,7 @@ int sgx_mig_init()
 	struct task_struct *tmp;
 	tmp = kthread_run(sgx_mig_thread, NULL, "ksgxmigd");
 	if (!IS_ERR(tmp)) {
+		printk("intel_sgx: ksgxmigd started");
 		ksgxmigd_task = tmp;
 	}
 	return PTR_ERR_OR_ZERO(tmp);
